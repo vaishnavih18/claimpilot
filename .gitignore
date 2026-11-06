@@ -1,0 +1,18 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Env/secrets
+.env
+.env.*
+*.pem
+
+# Node/React
+node_modules/
+dist/
+build/
+
+# Docker
+*.log
