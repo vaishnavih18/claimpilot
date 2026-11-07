@@ -53,6 +53,31 @@ resource "aws_opensearch_domain" "main" {
   # neural-sparse model) - check AWS's supported-versions list first since
   # not every OpenSearch OSS version is offered as a managed domain.
 
+  # Resource-based access policy. REQUIRED for the API to reach the domain:
+  # the API authenticates with HTTP basic auth (master user, see
+  # advanced_security_options below), and a basic-auth request carries no IAM
+  # identity - IAM sees it as "anonymous". With an empty policy the domain
+  # rejects it with 403 "User: anonymous is not authorized to perform:
+  # es:ESHttp..." before fine-grained access control ever checks the
+  # username/password. Principal "*" therefore does NOT mean open to the
+  # world here: the domain is VPC-only (only reachable through its security
+  # group from inside the VPC), and fine-grained access control still demands
+  # valid credentials on every request. This is the standard policy for FGAC
+  # + basic auth.
+  # The ARN is built by hand (not aws_opensearch_domain.main.arn) because a
+  # resource cannot reference itself.
+  # When to change: switch the API to SigV4-signed requests with a specific
+  # IAM role (and map that role in FGAC) to drop the "*" principal.
+  access_policies = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { AWS = "*" }
+      Action    = "es:ESHttp*"
+      Resource  = "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${var.project_name}-search/*"
+    }]
+  })
+
   cluster_config {
     instance_type  = var.opensearch_instance_type
     instance_count = 1
