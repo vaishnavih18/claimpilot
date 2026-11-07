@@ -57,7 +57,7 @@ spec:
             # RDS_SECRET_ARN's target, which is why this is the one still
             # missing its real value rather than a placeholder ARN.
             - name: OPENSEARCH_HOST
-              value: "REPLACE_WITH_terraform_output_opensearch_endpoint"
+              value: "vpc-claimpilot-search-lthmn4f34zwxrwlbcwi4agawym.ap-southeast-2.es.amazonaws.com"
             - name: AWS_REGION
               value: "ap-southeast-2"
           resources:
