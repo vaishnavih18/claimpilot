@@ -21,6 +21,7 @@ variable "frontend_dev_port" {
 locals {
   frontend_origins = compact([
     "http://localhost:${var.frontend_dev_port}",
+    local.cloudfront_url, # https://<id>.cloudfront.net, "" until cloudfront.tf is enabled
     var.frontend_production_url,
   ])
 }
