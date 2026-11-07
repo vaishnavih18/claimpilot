@@ -60,6 +60,19 @@ spec:
               value: "vpc-claimpilot-search-lthmn4f34zwxrwlbcwi4agawym.ap-southeast-2.es.amazonaws.com"
             - name: AWS_REGION
               value: "ap-southeast-2"
+            # Cognito: the API validates every request's ID token against
+            # this user pool + app client (app/app/auth.py). Values come from
+            # config.yaml. Unset/placeholder = the API rejects requests.
+            - name: COGNITO_USER_POOL_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: claimpilot-config
+                  key: COGNITO_USER_POOL_ID
+            - name: COGNITO_APP_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: claimpilot-config
+                  key: COGNITO_APP_CLIENT_ID
           resources:
             requests:
               cpu: 100m

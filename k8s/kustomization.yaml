@@ -12,10 +12,17 @@ namespace: claimpilot
 resources:
   - namespace.yaml
   - service-account.yaml
+  - config.yaml
   - deployment.yaml
   - service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingress.yaml
 
 images:
   - name: claimpilot-api:placeholder
     newName: 202113032991.dkr.ecr.ap-southeast-2.amazonaws.com/claimpilot/api
+    newTag: v1
+  - name: claimpilot-frontend:placeholder
+    newName: 202113032991.dkr.ecr.ap-southeast-2.amazonaws.com/claimpilot/frontend
     newTag: v1

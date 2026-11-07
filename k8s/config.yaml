@@ -1,0 +1,29 @@
+# Non-secret auth/runtime settings shared by the API and the frontend. None of
+# these are secrets (the pool ID, client ID and Hosted UI domain are visible in
+# every login redirect and in the ID token itself).
+#
+# Filled from `terraform output` after applying infra/terraform/cognito.tf (re-check if the pool is ever recreated):
+#   terraform output cognito_user_pool_id
+#   terraform output cognito_app_client_id
+#   terraform output cognito_hosted_ui_domain
+# then commit - CI applies this file on every deploy, so a value edited only
+# in the cluster would be overwritten.
+#
+# Until real values are here the API fails CLOSED (every /api request is
+# rejected with 503/401) and sign-in on the frontend cannot start; nothing
+# is exposed by leaving the placeholders.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: claimpilot-config
+  namespace: claimpilot
+data:
+  COGNITO_USER_POOL_ID: "ap-southeast-2_DZbUtMOED"
+  COGNITO_APP_CLIENT_ID: "3r6tsvcm4pnof3ni1lp6nih79v"
+  COGNITO_DOMAIN: "https://claimpilot-auth-202113032991.auth.ap-southeast-2.amazoncognito.com"
+  # Empty = the frontend calls the API on its own origin (/api/...), which the
+  # Ingress routes to the API service (and nginx proxies as a fallback).
+  API_BASE_URL: ""
+  # "true" shows the "Sign in with Google" button; set it only after Google is
+  # enabled in Cognito (infra/terraform/cognito.tf), or the button errors.
+  GOOGLE_LOGIN: "true"

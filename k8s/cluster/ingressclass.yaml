@@ -1,0 +1,32 @@
+# Cluster-scoped, so it is NOT part of kustomization.yaml: CI's role only has
+# namespace-scoped (claimpilot) permissions (infra/terraform/github_oidc.tf).
+# Apply ONCE as the cluster admin:
+#   kubectl apply -f k8s/cluster/ingressclass.yaml
+#
+# EKS Auto Mode's ALB support: controller `eks.amazonaws.com/alb`, with ALB
+# settings in IngressClassParams (Auto Mode does not read the usual
+# `alb.ingress.kubernetes.io/*` annotations). Public subnets are already
+# tagged kubernetes.io/role/elb in vpc.tf, which is how the ALB finds them.
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: alb
+spec:
+  scheme: internet-facing
+  # A triage call (Bedrock + OpenSearch, sometimes with a retry) can run well
+  # past the ALB's default 60s idle timeout.
+  loadBalancerAttributes:
+    - key: idle_timeout.timeout_seconds
+      value: "120"
+  # Domain later: certificateARNs: ["arn:aws:acm:ap-southeast-2:...:certificate/..."]
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: alb
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: alb

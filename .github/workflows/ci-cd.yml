@@ -76,12 +76,20 @@ jobs:
         working-directory: app
         run: python scripts/test_agent_graph.py
 
+      - name: Run auth tests (local RSA key standing in for Cognito's JWKS)
+        working-directory: app
+        # httpx is what FastAPI's TestClient needs; not a runtime dependency.
+        run: |
+          pip install httpx
+          python scripts/test_auth.py
+
   build-and-push:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.vars.outputs.image }}
+      frontend_image: ${{ steps.vars.outputs.frontend_image }}
     steps:
       - uses: actions/checkout@v4
 
@@ -102,12 +110,22 @@ jobs:
           # be re-pushed even if this used one; the SHA is also directly
           # traceable back to the exact commit that produced the image.
           echo "image=${{ steps.ecr-login.outputs.registry }}/claimpilot/api:${TAG}" >> "$GITHUB_OUTPUT"
+          echo "frontend_image=${{ steps.ecr-login.outputs.registry }}/claimpilot/frontend:${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push API image
         working-directory: app
         run: |
           docker build -t "${{ steps.vars.outputs.image }}" .
           docker push "${{ steps.vars.outputs.image }}"
+
+      - name: Build and push frontend image
+        working-directory: frontend
+        # Same SHA tag as the API image. Cognito/API settings are NOT baked
+        # in: they are injected at container start from the claimpilot-config
+        # ConfigMap (k8s/config.yaml), so one image works for any environment.
+        run: |
+          docker build -t "${{ steps.vars.outputs.frontend_image }}" .
+          docker push "${{ steps.vars.outputs.frontend_image }}"
 
   deploy:
     needs: build-and-push
@@ -128,10 +146,13 @@ jobs:
         working-directory: k8s
         run: |
           kustomize edit set image "claimpilot-api:placeholder=${{ needs.build-and-push.outputs.image }}"
+          kustomize edit set image "claimpilot-frontend:placeholder=${{ needs.build-and-push.outputs.frontend_image }}"
           kubectl apply -k .
 
       - name: Wait for rollout
-        run: kubectl -n claimpilot rollout status deployment/claimpilot-api --timeout=120s
+        run: |
+          kubectl -n claimpilot rollout status deployment/claimpilot-api --timeout=120s
+          kubectl -n claimpilot rollout status deployment/claimpilot-frontend --timeout=120s
         # Fails the workflow (not just the kubectl apply step) if the new
         # image doesn't actually reach Running/Ready within 2 minutes --
         # `kubectl apply` succeeding only means the Deployment object was

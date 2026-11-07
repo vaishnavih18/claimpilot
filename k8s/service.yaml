@@ -1,3 +1,9 @@
+# type: ClusterIP - the API is reached through the Ingress (ingress.yaml: one
+# ALB, /api -> this service), not through its own load balancer. This used to
+# be `type: LoadBalancer` (a dedicated NLB); the note below about switching to
+# an Ingress once a second HTTP service existed is what this change does.
+# The old NLB (and its hourly cost) goes away when this is applied.
+#
 # type: LoadBalancer, not ClusterIP or NodePort: this cluster's Auto Mode
 # config (eks.tf's kubernetes_network_config.elastic_load_balancing) was
 # specifically turned on so that a plain `type: LoadBalancer` Service gets
@@ -19,7 +25,7 @@ metadata:
   name: claimpilot-api
   namespace: claimpilot
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   selector:
     app: claimpilot-api
   ports:

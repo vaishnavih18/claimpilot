@@ -1,0 +1,45 @@
+# One internet-facing ALB in front of both services, created by EKS Auto
+# Mode's built-in load balancing (the IngressClass in k8s/cluster/ - no
+# separate AWS Load Balancer Controller is installed):
+#   /api/*  -> claimpilot-api       (FastAPI; every route requires a Cognito ID token)
+#   /*      -> claimpilot-frontend  (nginx + React SPA)
+#
+# HTTP only for now - there is no domain, so no ACM certificate and no HTTPS
+# listener. IMPORTANT consequence: Cognito only accepts http:// callback URLs
+# for localhost, so signing in through this ALB's own hostname does NOT work.
+# Sign in via http://localhost:5173 (see README: kubectl port-forward).
+#
+# Adding a real domain later:
+#   1. Route 53 hosted zone + an alias A record -> this ALB.
+#   2. ACM certificate for the domain (DNS-validated), in ap-southeast-2.
+#   3. Put the certificate ARN in k8s/cluster/ingressclass.yaml
+#      (IngressClassParams.spec.certificateARNs) - Auto Mode then adds the
+#      HTTPS:443 listener - and add an HTTP->HTTPS redirect.
+#   4. Set var.frontend_production_url in infra/terraform (https://<domain>)
+#      and re-apply so Cognito registers <domain>/callback and <domain>/.
+# Nothing in the app code changes: the frontend builds its redirect URI from
+# window.location.origin.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: claimpilot
+  namespace: claimpilot
+spec:
+  ingressClassName: alb
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: claimpilot-api
+                port:
+                  number: 80
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: claimpilot-frontend
+                port:
+                  number: 80

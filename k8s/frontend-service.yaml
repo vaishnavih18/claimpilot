@@ -1,0 +1,14 @@
+# ClusterIP: only the Ingress (ALB) and in-cluster callers reach it - no
+# load balancer of its own.
+apiVersion: v1
+kind: Service
+metadata:
+  name: claimpilot-frontend
+  namespace: claimpilot
+spec:
+  type: ClusterIP
+  selector:
+    app: claimpilot-frontend
+  ports:
+    - port: 80
+      targetPort: 8080

@@ -1,0 +1,51 @@
+# The React frontend: nginx serving the static build (frontend/Dockerfile).
+# Same sizing logic as deployment.yaml - 1 replica, small requests, because
+# Auto Mode bills for what is requested. Runtime settings (Cognito domain /
+# client ID) come from the claimpilot-config ConfigMap via envFrom; the
+# container writes them into /config.js at start-up.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claimpilot-frontend
+  namespace: claimpilot
+  labels:
+    app: claimpilot-frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claimpilot-frontend
+  template:
+    metadata:
+      labels:
+        app: claimpilot-frontend
+    spec:
+      containers:
+        - name: frontend
+          # Placeholder rewritten by kustomization.yaml's `images:` block /
+          # `kustomize edit set image` in CI, same as the API image.
+          image: claimpilot-frontend:placeholder
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: claimpilot-config
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /index.html
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /index.html
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
