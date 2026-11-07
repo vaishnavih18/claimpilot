@@ -1,0 +1,38 @@
+# Rendered by the nginx image's envsubst step at container start (only
+# variables defined in the environment are substituted; nginx's own $vars are untouched).
+server {
+  listen 8080;
+  root /usr/share/nginx/html;
+
+  # Never cache the runtime config or the HTML shell - a new deploy must be
+  # picked up immediately. Hashed assets under /assets/ can be cached hard.
+  location = /config.js { add_header Cache-Control "no-store"; }
+  location = /index.html { add_header Cache-Control "no-cache"; }
+  location /assets/ { add_header Cache-Control "public, max-age=31536000, immutable"; }
+
+  # Same-origin API proxy. In the cluster the ALB Ingress already routes
+  # /api straight to the API service; this exists so the frontend also works
+  # when reached on its own (e.g. `kubectl port-forward svc/claimpilot-frontend
+  # 5173:80` for sign-in testing at http://localhost:5173), with no CORS.
+  # Triage runs real Bedrock/OpenSearch calls, hence the long read timeout.
+  #
+  # proxy_pass uses a variable plus a resolver so nginx resolves the API
+  # service at request time. A literal hostname is resolved once at start-up,
+  # and nginx refuses to start at all if it can't (e.g. the API Service isn't
+  # up yet, or the image is run outside the cluster). NGINX_LOCAL_RESOLVERS is
+  # filled in by the base image from /etc/resolv.conf (cluster DNS in k8s).
+  location /api/ {
+    resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+    set $api_upstream "http://claimpilot-api.claimpilot.svc.cluster.local:80";
+    proxy_pass $api_upstream;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
+  }
+
+  # Single-page app: unknown paths (/callback, /claims/CLM-001) serve the
+  # shell and React Router takes over.
+  location / {
+    try_files $uri /index.html;
+  }
+}
