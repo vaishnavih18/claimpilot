@@ -1,0 +1,140 @@
+# CI/CD: test on every push/PR, build+push+deploy only on a push to main.
+#
+# Three jobs (test -> build-and-push -> deploy) rather than one long job,
+# so `needs:` makes the ordering explicit: a failing test blocks the
+# build, a failing build blocks a deploy. Running as three separate jobs
+# also means `test` runs on a PR from a fork with zero AWS credentials
+# available to it (see the OIDC trust policy's `sub` condition in
+# infra/terraform/github_oidc.tf, which only allows pushes to main to
+# assume the AWS role) -- the other two jobs simply never start for a PR.
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  id-token: write # required for the OIDC step in build-and-push/deploy
+  contents: read
+
+env:
+  AWS_REGION: ap-southeast-2
+  # Not a secret -- an IAM role ARN grants nothing on its own without
+  # being allowed to assume it (same reasoning k8s/deployment.yaml's
+  # RDS_SECRET_ARN already uses for the same kind of value). Keep this in
+  # sync with `terraform output github_actions_ci_role_arn` -- nothing
+  # enforces that automatically, see that output's description.
+  AWS_GITHUB_ACTIONS_ROLE_ARN: arn:aws:iam::202113032991:role/claimpilot-github-actions-ci
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Real Postgres (the same pgvector image docker-compose.yaml already
+    # uses locally) as a service container -- lets this job actually run
+    # migrations and the agent graph test for real, not just a syntax
+    # check. No AWS credentials needed anywhere in this job: the agent
+    # graph test (app/scripts/test_agent_graph.py) uses fake
+    # OpenSearch/Bedrock clients by design (see that script's own
+    # docstring), specifically so this job can run on every PR -- including
+    # one from a fork -- without any secret ever being exposed to it.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: claimpilot_ci
+          POSTGRES_PASSWORD: claimpilot_ci
+          POSTGRES_DB: claimpilot_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+psycopg://claimpilot_ci:claimpilot_ci@localhost:5432/claimpilot_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: app
+        run: pip install -r requirements.txt
+
+      - name: Run migrations against the service Postgres
+        working-directory: app
+        run: alembic upgrade head
+
+      - name: Run agent graph test (fake OpenSearch/Bedrock, real Postgres)
+        working-directory: app
+        run: python scripts/test_agent_graph.py
+
+  build-and-push:
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.vars.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+
+      - id: vars
+        run: |
+          TAG="${GITHUB_SHA:0:12}"
+          # Short commit SHA, not `latest` -- the ECR repos are IMMUTABLE
+          # (infra/terraform/ecr.tf), so a floating `latest` tag couldn't
+          # be re-pushed even if this used one; the SHA is also directly
+          # traceable back to the exact commit that produced the image.
+          echo "image=${{ steps.ecr-login.outputs.registry }}/claimpilot/api:${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push API image
+        working-directory: app
+        run: |
+          docker build -t "${{ steps.vars.outputs.image }}" .
+          docker push "${{ steps.vars.outputs.image }}"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name claimpilot-cluster --region ${{ env.AWS_REGION }}
+
+      - name: Set image and apply
+        working-directory: k8s
+        run: |
+          kustomize edit set image "claimpilot-api:placeholder=${{ needs.build-and-push.outputs.image }}"
+          kubectl apply -k .
+
+      - name: Wait for rollout
+        run: kubectl -n claimpilot rollout status deployment/claimpilot-api --timeout=120s
+        # Fails the workflow (not just the kubectl apply step) if the new
+        # image doesn't actually reach Running/Ready within 2 minutes --
+        # `kubectl apply` succeeding only means the Deployment object was
+        # accepted, not that the new pod came up healthy. Without this,
+        # a broken image would show a green CI run right up until someone
+        # noticed the app was actually down.
