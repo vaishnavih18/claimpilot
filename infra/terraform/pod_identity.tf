@@ -50,6 +50,41 @@ resource "aws_iam_role_policy" "claimpilot_api_pod_secrets" {
   })
 }
 
+# Bedrock access for the agent running in the pod: Titan embeddings (retrieval),
+# Sonnet 4.5 (assess step), Haiku 4.5 (query rewrite). Locally these calls use
+# your own AWS profile; in the cluster the pod's role needs its own permission,
+# otherwise triage fails with AccessDeniedException on bedrock:InvokeModel.
+#
+# Scoped to exactly the models in app/app/agent/clients.py, not bedrock:*.
+# The chat models are called through the "au." cross-region inference
+# profiles, and invoking a profile needs permission on BOTH the profile ARN and
+# the underlying foundation model in every region it can route to (the AU
+# profiles route between ap-southeast-2 and ap-southeast-4). `Converse` is
+# authorised by bedrock:InvokeModel.
+# When to change: add the new model's ARNs here whenever EMBEDDING_MODEL_ID,
+# CHAT_MODEL_ID or QUERY_MODEL_ID in clients.py points at a different model.
+resource "aws_iam_role_policy" "claimpilot_api_pod_bedrock" {
+  name = "${var.project_name}-api-pod-bedrock-access"
+  role = aws_iam_role.claimpilot_api_pod.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+      Resource = [
+        "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0",
+        "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/au.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/au.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "arn:aws:bedrock:ap-southeast-2::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "arn:aws:bedrock:ap-southeast-4::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "arn:aws:bedrock:ap-southeast-2::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+        "arn:aws:bedrock:ap-southeast-4::foundation-model/anthropic.claude-haiku-4-5-20251001-v1:0",
+      ]
+    }]
+  })
+}
+
 resource "aws_eks_pod_identity_association" "claimpilot_api" {
   cluster_name    = aws_eks_cluster.main.name
   namespace       = "claimpilot"
