@@ -2,7 +2,7 @@
 
 **An agentic insurance-claims triage assistant, built on AWS with LangGraph and Amazon Bedrock.**
 
-Given a home-insurance claim and a corpus of policy documents, an agent retrieves the relevant clauses, reasons over them with an LLM, and returns a structured triage decision (`covered` / `partly_covered` / `not_covered` / `unsure`) with cited clauses and a confidence score — retrying its own retrieval once if it isn't confident enough the first time. All data is synthetic (AU home-insurance policies and claims); nothing here touches real customer data.
+ClaimPilot is a forward-deployed-engineer-style portfolio project: given a home-insurance claim and a corpus of policy documents, an agent retrieves the relevant clauses, reasons over them with an LLM, and returns a structured triage decision (`covered` / `partly_covered` / `not_covered` / `unsure`) with cited clauses and a confidence score — retrying its own retrieval once if it isn't confident enough the first time. All data is synthetic (AU home-insurance policies and claims); nothing here touches real customer data.
 
 ## Architecture
 
@@ -130,6 +130,16 @@ Three jobs, `test → build-and-push → deploy`:
 ## Known findings
 
 On the first real end-to-end run against live AWS infrastructure (`CLM-001`), the agent returned `unsure` (confidence 0.20) against an expected label of `covered` — a genuine retrieval gap (one expected clause, `HOME-3.1`, never surfaced in the top results) rather than a bug. This is exactly the kind of finding the planned eval harness is meant to characterize systematically across the full labelled claim set, rather than one claim at a time.
+
+### Bugs found getting CI/CD running end-to-end
+
+Three real, non-obvious bugs turned up only once the pipeline was run for real against live GitHub/AWS, each diagnosed from direct evidence rather than assumption:
+
+- **`test_agent_graph.py` was clobbering CI's own `DATABASE_URL`.** The script unconditionally set `os.environ["DATABASE_URL"]` to a hardcoded local convenience value (for zero-setup local runs), which silently overrode the real service-container credentials the `test` job had already exported. Fixed with `os.environ.setdefault(...)` so CI's value wins when present, local convenience stays when it's not.
+- **GitHub's OIDC token didn't match the trust policy — because GitHub has moved on.** The IAM role's trust policy was written against the "classic" `sub` claim format (`repo:owner/repo:ref:...`). A debug step added temporarily to the workflow (decode and print the actual token) showed GitHub now issues `repo:owner@owner_id/repo@repo_id:ref:...` — an immutable-ID format that survives a repo rename or ownership transfer, where the name-based version could be hijacked by whoever claims the old name afterward. The fix was to update the trust policy to the new format, not to fight it — it's the more secure option anyway.
+- **A dependency that only ever existed by hand.** The `claimpilot-api` ServiceAccount (required for the EKS Pod Identity association) had been created once with an imperative `kubectl create`, never as a committed manifest. At some point it was deleted and nothing could recreate it — every `kubectl apply -k .` silently had nothing to say about it. Fixed by adding `k8s/service-account.yaml` as a tracked, kustomize-applied resource, so it's reliably recreated by CI from now on instead of depending on someone remembering a one-off command.
+
+A broader meta-finding sits underneath all three: most of this repo (`app/`, `k8s/`, most of `infra/terraform/*.tf`) had actually never been committed to git before this pipeline was first run — only a handful of files had made it in. CI immediately surfaced that gap the first time it checked out a clean copy of the repo, which is exactly the kind of drift a CI pipeline is supposed to catch.
 
 ## Roadmap
 
