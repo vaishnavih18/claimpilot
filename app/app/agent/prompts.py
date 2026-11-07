@@ -23,17 +23,22 @@ Rules:
 - Cite only clause_ids that were actually provided to you, and only ones that \
 materially support your decision. Do not cite a clause just because it was in \
 the list.
-- If the provided clauses do not clearly address the claim's specific facts \
-(e.g. the right peril/exclusion clause doesn't appear in what you were given), \
-decide "unsure" rather than guessing - a low-confidence guess is worse than an \
-honest "the retrieval didn't surface the right clause."
+- A clause that describes what the policy covers in general terms (a scope-of-\
+cover, "what we cover" or insured-events clause) IS sufficient basis for \
+"covered" when the claim's facts fall within that scope and none of the \
+provided exclusions, conditions or limits applies to them. A policy does not \
+have to name every individual cause of loss; do not require a clause that \
+mentions the claim's specific peril by name.
+- Decide "unsure" only when the provided clauses genuinely cannot settle the \
+claim: no provided clause relates to the type of loss at all, an exclusion or \
+condition might apply but the claim facts don't say enough to tell, or clauses \
+conflict. "unsure" is not a default for a claim whose peril merely isn't named.
 - "partly_covered" is for cases where a clause itself implies a partial outcome \
 (e.g. a sum-insured/underinsurance clause capping payout below the claimed \
 amount), not a hedge when you're simply uncertain - use "unsure" for uncertainty.
-- confidence must reflect how directly the clauses you cited address this \
-claim's specific facts, not how fluent your reasoning sounds. A claim matched \
-only by a generic coverage clause with no peril-specific language should score \
-LOWER confidence than one matched by a clause naming the exact peril involved.
+- confidence must reflect how well the cited clauses settle this claim's \
+specific facts (including whether any exclusion or limit applies), not how \
+fluent your reasoning sounds.
 - reasoning should name which clause(s) drove the decision and why, in 2-4 \
 sentences - this is stored as the audit trail for the decision, not a chat reply.
 """
@@ -90,3 +95,15 @@ TRIAGE_TOOL_SPEC = {
         },
     }
 }
+
+
+QUERY_EXPANSION_SYSTEM_PROMPT = """You help search an insurance policy document. \
+You will be given a customer's claim description. Rewrite it as a search query \
+that would match the WORDING of policy clauses, not the customer's wording.
+
+Output one short paragraph (max 80 words, plain text, no preamble) covering:
+- the event or peril in neutral policy terms (e.g. what happened, to what property/person/item)
+- the general type of cover or benefit this would fall under (the section of the policy that says what is covered)
+- any exclusions, limits, conditions or definitions that could decide the outcome
+
+Do not decide whether the claim is covered. Do not invent facts that are not in the claim."""

@@ -37,6 +37,11 @@ EMBEDDING_MODEL_ID = "amazon.titan-embed-text-v2:0"
 # Sonnet 4.5 inference profiles" step and replace this placeholder.
 CHAT_MODEL_ID = "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
+# Cheaper/faster model for the query-rewrite step before retrieval (a short
+# paraphrase task, not coverage reasoning). Profile ID taken from
+# `aws bedrock list-inference-profiles` in this account.
+QUERY_MODEL_ID = "au.anthropic.claude-haiku-4-5-20251001-v1:0"
+
 
 def get_opensearch_client() -> OpenSearch:
     host = os.environ.get("OPENSEARCH_HOST")

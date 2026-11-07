@@ -112,3 +112,21 @@ def hybrid_search(
         )
         for hit in resp["hits"]["hits"]
     ]
+
+
+def fetch_clause_texts(os_client: OpenSearch, clause_ids: list[str]) -> dict[str, str]:
+    """Look up clauses by exact clause_id (a keyword field - see
+    ingest.py's INDEX_BODY) and return {clause_id: text}. IDs that aren't
+    in the index are simply absent from the result; callers decide what to
+    show for those."""
+    if not clause_ids:
+        return {}
+    resp = os_client.search(
+        index=INDEX_NAME,
+        body={
+            "size": len(clause_ids),
+            "_source": ["clause_id", "text"],
+            "query": {"terms": {"clause_id": clause_ids}},
+        },
+    )
+    return {hit["_source"]["clause_id"]: hit["_source"]["text"] for hit in resp["hits"]["hits"]}

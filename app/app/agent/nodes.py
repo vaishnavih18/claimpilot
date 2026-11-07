@@ -13,10 +13,11 @@ retry_count, and keeps the increment from being duplicated if retrieve_node
 or assess_node's logic changes later.
 """
 
+import os
 import uuid
 
-from app.agent.clients import CHAT_MODEL_ID, get_bedrock_runtime_client, get_opensearch_client
-from app.agent.prompts import SYSTEM_PROMPT, TRIAGE_TOOL_SPEC, build_user_message
+from app.agent.clients import CHAT_MODEL_ID, QUERY_MODEL_ID, get_bedrock_runtime_client, get_opensearch_client
+from app.agent.prompts import QUERY_EXPANSION_SYSTEM_PROMPT, SYSTEM_PROMPT, TRIAGE_TOOL_SPEC, build_user_message
 from app.agent.retrieval import ensure_search_pipeline, hybrid_search
 from app.agent.state import AgentState
 from app.db.base import SessionLocal
@@ -38,6 +39,29 @@ from app.db.models import TriageDecision
 RETRY_CONFIDENCE_THRESHOLD = 0.6
 
 
+def expand_query(bedrock_client, claim_text: str) -> str:
+    """Rewrite the claim into policy-clause wording so broad "what is covered"
+    clauses can match (a claim saying "pipe burst" doesn't lexically or
+    semantically resemble a clause titled "Scope of Cover"). The original
+    claim text is kept in the query too, so nothing the customer said is
+    lost. Falls back to the plain claim text if the rewrite call fails -
+    retrieval degrades to the old behaviour rather than failing the claim.
+    Set QUERY_EXPANSION=0 to disable (used for A/B evals)."""
+    if os.environ.get("QUERY_EXPANSION", "1") == "0":
+        return claim_text
+    try:
+        resp = bedrock_client.converse(
+            modelId=QUERY_MODEL_ID,
+            system=[{"text": QUERY_EXPANSION_SYSTEM_PROMPT}],
+            messages=[{"role": "user", "content": [{"text": claim_text}]}],
+            inferenceConfig={"maxTokens": 200, "temperature": 0},
+        )
+        rewrite = resp["output"]["message"]["content"][0]["text"].replace("**Search Query:**", "").strip()
+        return f"{claim_text}\n{rewrite}"
+    except Exception:
+        return claim_text
+
+
 def retrieve_node(state: AgentState) -> dict:
     retry_count = state.get("retry_count", 0)
 
@@ -45,10 +69,13 @@ def retrieve_node(state: AgentState) -> dict:
     ensure_search_pipeline(os_client)
     bedrock_client = get_bedrock_runtime_client()
 
+    # Expanded once, reused on retry (the retry only changes k/jurisdiction).
+    query = state.get("retrieval_query") or expand_query(bedrock_client, state["claim_text"])
+
     clauses = hybrid_search(
         os_client,
         bedrock_client,
-        state["claim_text"],
+        query,
         # Widen on retry: more candidates (k), and drop the jurisdiction
         # filter - see retrieval.py's hybrid_search docstring for why
         # jurisdiction (not policy_type) is the dial that moves.
@@ -57,7 +84,7 @@ def retrieve_node(state: AgentState) -> dict:
         jurisdiction=state["claimant_state"] if retry_count == 0 else None,
     )
 
-    return {"retrieved_clauses": clauses, "retry_count": retry_count}
+    return {"retrieved_clauses": clauses, "retry_count": retry_count, "retrieval_query": query}
 
 
 def assess_node(state: AgentState) -> dict:

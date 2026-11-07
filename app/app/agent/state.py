@@ -39,6 +39,10 @@ class AgentState(TypedDict, total=False):
     amount_claimed: int
     prior_claims_count: int
 
+    # Written by the first retrieve_node call and reused on retry: the claim
+    # text rewritten into policy wording (see nodes.expand_query).
+    retrieval_query: str
+
     # Written by retrieve_node. Overwritten (not appended) on retry -- see
     # module docstring above.
     retrieved_clauses: list[RetrievedClause]
