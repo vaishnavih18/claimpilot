@@ -46,15 +46,15 @@ resource "aws_iam_role" "github_actions_ci" {
           # attack OIDC scoping exists to prevent. The test job in the
           # workflow still runs on PRs - it just never reaches the step
           # that needs AWS credentials.
-          "token.actions.githubusercontent.com:sub" = "repo:vaishnavih18/claimpilot:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "repo:vaishnavih18@41016642/claimpilot@1447739339:ref:refs/heads/main"
         }
       }
     }]
   })
 }
 
-# ECR: push access scoped to exactly the two repos this project's CI
-# actually builds (api, mcp-server) - not ecr:* on every repo in the
+# ECR: push access scoped to exactly the repos this project's CI
+# actually builds (every repo in aws_ecr_repository.main: api, mcp-server, frontend) - not ecr:* on every repo in the
 # account. Same "scope to exactly what's needed" pattern as the Pod
 # Identity role's Secrets Manager permission elsewhere in this project.
 resource "aws_iam_role_policy" "github_actions_ecr" {

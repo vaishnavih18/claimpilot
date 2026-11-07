@@ -17,7 +17,7 @@ output "nat_gateway_ids" {
 }
 
 output "ecr_repository_urls" {
-  description = "ECR repo URLs (api, mcp-server) - needed by Docker/CI to know where to push built images."
+  description = "ECR repo URLs (api, mcp-server, frontend) - needed by Docker/CI to know where to push built images."
   value       = { for k, repo in aws_ecr_repository.main : k => repo.repository_url }
 }
 
@@ -62,4 +62,19 @@ output "eks_cluster_endpoint" {
 output "github_actions_ci_role_arn" {
   description = "IAM role GitHub Actions assumes via OIDC (github_oidc.tf) - hardcoded into .github/workflows/ci-cd.yml's role-to-assume, not read dynamically. Run `terraform output github_actions_ci_role_arn` after any change to project_name and confirm it still matches what the workflow file has, since nothing enforces that the two stay in sync automatically."
   value       = aws_iam_role.github_actions_ci.arn
+}
+
+output "cognito_user_pool_id" {
+  description = "Cognito user pool ID - the API (COGNITO_USER_POOL_ID) uses it to build the issuer and JWKS URL."
+  value       = aws_cognito_user_pool.main.id
+}
+
+output "cognito_app_client_id" {
+  description = "Cognito app client ID for the frontend - the API checks the ID token's audience against it, and the frontend uses it in the Hosted UI redirect."
+  value       = aws_cognito_user_pool_client.frontend.id
+}
+
+output "cognito_hosted_ui_domain" {
+  description = "Hosted UI base URL (https://<prefix>.auth.<region>.amazoncognito.com) - the frontend's /oauth2/authorize, /oauth2/token and /logout endpoints hang off this."
+  value       = "https://${aws_cognito_user_pool_domain.main.domain}.auth.${var.aws_region}.amazoncognito.com"
 }

@@ -1,9 +1,10 @@
 locals {
-  # Two images: the FastAPI app (agent + GraphQL API) and the MCP server.
-  # Matches the two things in app/ that actually get containerized and
+  # Three images: the FastAPI app (agent + GraphQL API), the MCP server, and
+  # the React frontend (nginx serving the static build).
+  # The first two are the things in app/ that actually get containerized and
   # deployed to EKS — app/agent + app/api together as one image, and
   # app/mcp_server as a separate one, since they're separate deployments.
-  ecr_repositories = ["api", "mcp-server"]
+  ecr_repositories = ["api", "mcp-server", "frontend"]
 }
 
 resource "aws_ecr_repository" "main" {

@@ -18,6 +18,11 @@ terraform {
       source  = "hashicorp/tls"
       version = "~> 4.0"
     }
+    # Added for cognito.tf - zips the pre-sign-up Lambda source.
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
     # Added for github_oidc.tf — fetches GitHub's real OIDC certificate
     # thumbprint at apply time rather than hardcoding one that would go
     # stale if GitHub ever rotates it.

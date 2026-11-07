@@ -29,3 +29,9 @@ __pycache__/
 
 # Delivery tarballs (packaging artifacts, not source)
 *.tar.gz
+
+# Terraform secrets / build output
+*.tfvars
+*.auto.tfvars
+infra/terraform/.build/
+evals/eval-results*.json
