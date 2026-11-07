@@ -1,0 +1,79 @@
+# ClaimPilot local dev stack: OpenSearch (policy hybrid search) + Postgres/pgvector
+# (claims, decisions, audit log, agent checkpoints, similar-claims lookup).
+#
+# This is LOCAL ONLY -- day 2 moves the real pipeline onto AWS (managed OpenSearch
+# Service + RDS). This compose file exists so you can build and test the ingestion
+# and search code against something, before paying for or provisioning the AWS
+# equivalents.
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f opensearch   # first boot takes ~30-60s
+#   docker compose down                 # stop (keeps data in named volumes)
+#   docker compose down -v              # stop AND wipe data
+
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.19.0
+    container_name: claimpilot-opensearch
+    environment:
+      - discovery.type=single-node
+      # Security plugin is OFF for local dev only. AWS OpenSearch Service uses
+      # IAM-based access policies + SigV4 signing instead (see your plan's risk
+      # table) -- this flag has no equivalent in prod and must never be carried
+      # into the Terraform config.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      # Heap size: 512m is enough for ~45 clauses x 3 policies (a few hundred
+      # small documents). Raise this only if you ingest much more data and see
+      # OOM errors in `docker compose logs opensearch`.
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200" # REST API -- what your ingestion/search code talks to
+      - "9600:9600" # performance analyzer, not used but harmless to expose
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.19.0
+    container_name: claimpilot-dashboards
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      # Security plugin is off on the opensearch service too, so Dashboards
+      # must be told not to expect it -- otherwise it refuses to start.
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - "5601:5601"
+    depends_on:
+      opensearch:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: claimpilot-postgres
+    environment:
+      - POSTGRES_USER=claimpilot
+      - POSTGRES_PASSWORD=claimpilot_local_dev
+      - POSTGRES_DB=claimpilot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U claimpilot -d claimpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  opensearch-data:
+  postgres-data:

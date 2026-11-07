@@ -1,0 +1,20 @@
+# kustomize (bundled into kubectl as `kubectl apply -k`), not plain
+# `kubectl apply -f k8s/`: the `images:` block below is what lets the real
+# ECR URL + tag get substituted into deployment.yaml's placeholder at
+# deploy time without hand-editing a YAML file every push - this is also
+# exactly the mechanism the GitHub Actions pipeline (the next checklist
+# item) will use to deploy whatever tag it just built.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: claimpilot
+
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+
+images:
+  - name: claimpilot-api:placeholder
+    newName: 202113032991.dkr.ecr.ap-southeast-2.amazonaws.com/claimpilot/api
+    newTag: v1

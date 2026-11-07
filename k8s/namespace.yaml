@@ -1,0 +1,11 @@
+# A dedicated namespace rather than deploying into "default":
+#   - keeps `kubectl get pods` readable once the mcp-server and (later)
+#     the React frontend's static-asset server also land on this cluster.
+#   - namespaces are the natural unit for applying a NetworkPolicy or a
+#     ResourceQuota later, if that ever becomes necessary.
+# When to change: never, really, for a single-app solo project - this is
+# just good habit-forming for free.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: claimpilot

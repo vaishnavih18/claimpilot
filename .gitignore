@@ -16,3 +16,16 @@ build/
 
 # Docker
 *.log
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Virtualenv
+.venv/
+
+# Delivery tarballs (packaging artifacts, not source)
+*.tar.gz

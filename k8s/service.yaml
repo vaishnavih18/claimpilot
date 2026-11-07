@@ -1,0 +1,27 @@
+# type: LoadBalancer, not ClusterIP or NodePort: this cluster's Auto Mode
+# config (eks.tf's kubernetes_network_config.elastic_load_balancing) was
+# specifically turned on so that a plain `type: LoadBalancer` Service gets
+# an AWS Network Load Balancer provisioned automatically - no separate
+# AWS Load Balancer Controller to install, which is the extra step a
+# non-Auto-Mode EKS cluster would need here instead.
+#
+# Cost note: an NLB bills by the hour (plus a small per-GB data charge)
+# from the moment this Service is created, same as the NAT gateway. Run
+# `kubectl delete -k k8s/` (or just delete this Service) when not actively
+# demoing, if idle cost between sessions matters.
+#
+# When to change: switch to an Ingress (ALB, path-based routing) once
+# there's a second HTTP service (e.g. the React frontend) that needs to
+# share one load balancer instead of paying for two.
+apiVersion: v1
+kind: Service
+metadata:
+  name: claimpilot-api
+  namespace: claimpilot
+spec:
+  type: LoadBalancer
+  selector:
+    app: claimpilot-api
+  ports:
+    - port: 80
+      targetPort: 8000

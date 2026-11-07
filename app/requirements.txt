@@ -1,0 +1,44 @@
+# Pinned to known-compatible minor versions, not exact patch versions -
+# patch releases of these three rarely break anything, and pinning too
+# tightly just means more manual bumping later for no safety benefit.
+#
+# When to change: once langgraph/langchain-aws/psycopg/strawberry-graphql
+# get added for the agent + GraphQL work, they go here too - this file is
+# meant to grow, not get replaced.
+
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.32,<0.33
+
+# Added for Postgres models + Alembic migrations + LangGraph checkpoints.
+# sqlalchemy/alembic: declarative models + versioned schema migrations.
+# psycopg[binary]: Postgres driver - "binary" extra bundles a prebuilt libpq
+# so there's no C toolchain / libpq-dev needed on either your machine or
+# inside the Docker image.
+# pgvector: gives SQLAlchemy a Vector column type matching the `vector`
+# Postgres extension - needed for the claims table's similarity-search
+# embedding column (same Titan V2 1024-dim embeddings ingest.py already
+# uses for policy clauses).
+# langgraph-checkpoint-postgres: LangGraph's own Postgres-backed
+# checkpointer - stores agent state/conversation history as JSON blobs in
+# tables it manages itself (see migrations/versions/0002_*.py for why that
+# one migration looks different from the others).
+# boto3: already a transitive need (ingest.py/generate.py use it for
+# Bedrock) - added here explicitly because the API now also needs it, to
+# fetch the RDS password from Secrets Manager at runtime instead of
+# reading it from an env var in plain text.
+sqlalchemy>=2.0,<2.1
+alembic>=1.13,<1.14
+psycopg[binary]>=3.1,<3.3
+pgvector>=0.3,<0.4
+langgraph-checkpoint-postgres>=2.0,<3.0
+boto3>=1.34,<2.0
+
+# Added for the LangGraph agent (app/agent/).
+# langgraph: the graph/StateGraph runtime itself - langgraph-checkpoint-postgres
+# above is only the Postgres-backed checkpointer plugin, it depends on this
+# but doesn't pull in a matching version automatically pinned here.
+# opensearch-py: the retrieval node's OpenSearch client (same library
+# ingest.py/hybrid_search.py already use at the repo root) - needed inside
+# the app package now too since app/agent/retrieval.py imports it directly.
+langgraph>=0.2,<0.3
+opensearch-py>=2.7,<2.8

@@ -1,0 +1,87 @@
+# 1 replica for this first deploy, not 2+: EKS Auto Mode provisions real
+# EC2 capacity on demand sized to what's actually requested below, so each
+# extra replica is actual billed compute, not a free correctness check.
+# Once this is confirmed working end-to-end, bump to 2 for the "survives
+# one pod restarting" property - one line (`replicas: 2`) away.
+#
+# requests/limits are set because EKS Auto Mode uses them (not the real
+# runtime usage) to decide how big a node to provision - an app with no
+# requests set would make Auto Mode guess, badly. 100m CPU / 128Mi memory
+# is generous for "FastAPI app that only serves /health" today; revisit
+# once the LangGraph agent (which will hold model clients, embeddings,
+# etc. in memory) is running in this same container.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claimpilot-api
+  namespace: claimpilot
+  labels:
+    app: claimpilot-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: claimpilot-api
+  template:
+    metadata:
+      labels:
+        app: claimpilot-api
+    spec:
+      # Matches k8s/service-account.yaml and infra/terraform/
+      # pod_identity.tf's aws_eks_pod_identity_association - this is what
+      # actually grants the pod permission to read the RDS secret, not
+      # anything in this Deployment spec itself.
+      serviceAccountName: claimpilot-api
+      containers:
+        - name: api
+          # Placeholder - kustomization.yaml's `images:` block rewrites this
+          # to the real ECR repo URL + tag at deploy time (`kustomize edit
+          # set image` or `kubectl apply -k`), so this file never needs
+          # hand-editing per deploy.
+          image: claimpilot-api:placeholder
+          ports:
+            - containerPort: 8000
+          env:
+            # The ARN itself isn't a secret - knowing it grants nothing
+            # without the pod identity association above also granting
+            # GetSecretValue on it. Hardcoded rather than templated: this
+            # project has exactly one environment, so there's no
+            # dev/staging/prod value to switch between.
+            - name: RDS_SECRET_ARN
+              value: "arn:aws:secretsmanager:ap-southeast-2:202113032991:secret:claimpilot-rds-credentials-1Q1dWZ"
+            # The agent's OpenSearch client (app/app/agent/clients.py)
+            # switches from local-no-auth to real HTTPS+basic-auth based
+            # on whether this is set - fill in with the real value from
+            # `terraform output opensearch_endpoint` (infra/terraform/).
+            # Not a secret itself (it's just a hostname), unlike
+            # RDS_SECRET_ARN's target, which is why this is the one still
+            # missing its real value rather than a placeholder ARN.
+            - name: OPENSEARCH_HOST
+              value: "REPLACE_WITH_terraform_output_opensearch_endpoint"
+            - name: AWS_REGION
+              value: "ap-southeast-2"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # livenessProbe: "is this pod wedged - kill and restart it."
+          # readinessProbe: "can this pod take traffic right now." Same path
+          # is fine here only because /health is dependency-free (see
+          # app/main.py) - if it ever started checking the DB, these two
+          # would need to split, or a slow DB would cause restart loops
+          # instead of just traffic being paused.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
