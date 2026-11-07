@@ -22,7 +22,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-os.environ["DATABASE_URL"] = "postgresql+psycopg://claimpilot_test:testpass@localhost:5432/claimpilot_test"
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://claimpilot_test:testpass@localhost:5432/claimpilot_test")
 
 from app.db.base import SessionLocal  # noqa: E402
 from app.db.models import Claim  # noqa: E402
