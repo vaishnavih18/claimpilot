@@ -2,7 +2,7 @@
 
 **An agentic insurance-claims triage assistant, built on AWS with LangGraph and Amazon Bedrock.**
 
-ClaimPilot is a forward-deployed-engineer-style portfolio project: given a home-insurance claim and a corpus of policy documents, an agent retrieves the relevant clauses, reasons over them with an LLM, and returns a structured triage decision (`covered` / `partly_covered` / `not_covered` / `unsure`) with cited clauses and a confidence score — retrying its own retrieval once if it isn't confident enough the first time. All data is synthetic (AU home-insurance policies and claims); nothing here touches real customer data.
+Given a home-insurance claim and a corpus of policy documents, ClaimPilot's agent retrieves the relevant clauses, reasons over them with an LLM, and returns a structured triage decision (`covered` / `partly_covered` / `not_covered` / `unsure`) with cited clauses and a confidence score — retrying its own retrieval once if it isn't confident enough the first time. The whole pipeline runs on real AWS infrastructure (EKS, RDS, OpenSearch, Bedrock), deployed and redeployed through its own CI/CD. All data is synthetic (AU home-insurance policies and claims); nothing here touches real customer data.
 
 ## Architecture
 
