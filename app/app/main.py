@@ -22,12 +22,22 @@ this one), a SEPARATE endpoint (e.g. /ready) should check DB connectivity.
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from app.routes import router
 
 app = FastAPI(
     title="ClaimPilot API",
     description="Agentic insurance claims-triage assistant - API layer.",
     version="0.1.0",
 )
+
+# Wide-open CORS so a local Vite dev server can call the API. Acceptable only
+# because this is an internal demo on synthetic data with no auth - tighten
+# allow_origins before anything real sits behind this.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+app.include_router(router)
 
 
 @app.get("/health")

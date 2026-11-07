@@ -42,3 +42,8 @@ boto3>=1.34,<2.0
 # the app package now too since app/agent/retrieval.py imports it directly.
 langgraph>=0.2,<0.3
 opensearch-py>=2.7,<2.8
+
+# Added for Cognito auth (app/auth.py): PyJWT validates the ID token's
+# signature/issuer/audience/expiry and fetches + caches Cognito's JWKS. The
+# [crypto] extra pulls in `cryptography`, needed for RS256.
+pyjwt[crypto]>=2.8,<3
