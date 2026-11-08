@@ -2,7 +2,11 @@
 
 **An agentic insurance-claims triage assistant, built on AWS with LangGraph and Amazon Bedrock.**
 
-Given a home-insurance claim and a corpus of policy documents, ClaimPilot's agent retrieves the relevant clauses, reasons over them with an LLM, and returns a structured triage decision (`covered` / `partly_covered` / `not_covered` / `unsure`) with cited clauses and a confidence score — retrying its own retrieval once if it isn't confident enough the first time. The whole pipeline runs on real AWS infrastructure (EKS, RDS, OpenSearch, Bedrock), deployed and redeployed through its own CI/CD. All data is synthetic (AU home-insurance policies and claims); nothing here touches real customer data.
+Given an insurance claim (home, motor or travel) and a corpus of policy documents, ClaimPilot's agent retrieves the relevant clauses, reasons over them with an LLM, and returns a structured triage decision (`covered` / `partly_covered` / `not_covered` / `unsure`) with cited clauses and a confidence score — retrying its own retrieval once if it isn't confident enough the first time. The whole pipeline runs on real AWS infrastructure (EKS, RDS, OpenSearch, Bedrock), deployed and redeployed through its own CI/CD. All data is synthetic (fictional Australian policies and claims); nothing here touches real customer data.
+
+**Live app:** https://d219gwvu4v84b7.cloudfront.net (Google sign-in, allowlisted accounts only).
+
+**New to the codebase? Start with the [end-to-end guide](docs/end-to-end-guide.md)**: how a sign-in and a triage request travel through every component, what lives where, permissions, configuration, the manual setup steps and a debugging playbook.
 
 ## Architecture
 
@@ -10,42 +14,50 @@ Given a home-insurance claim and a corpus of policy documents, ClaimPilot's agen
 flowchart TB
     subgraph GH["GitHub"]
         REPO[claimpilot repo]
-        ACTIONS["GitHub Actions CI/CD\n(test → build-and-push → deploy)"]
+        ACTIONS["GitHub Actions CI/CD<br/>test, build-and-push, deploy"]
     end
 
-    subgraph AWS["AWS (ap-southeast-2)"]
-        OIDC["IAM OIDC Provider\n(scoped to repo:vaishnavih18/claimpilot,\nref:refs/heads/main)"]
-        ECR["ECR\napi / mcp-server\n(IMMUTABLE tags)"]
-        BEDROCK["Amazon Bedrock\nTitan Embed Text v2 +\nClaude Sonnet 4.5 (Converse,\nforced tool-use)"]
+    USER["Browser"]
+
+    subgraph AWS["AWS ap-southeast-2"]
+        CF["CloudFront<br/>free HTTPS address"]
+        COG["Cognito<br/>Hosted UI + Google federation<br/>+ pre sign-up allowlist Lambda"]
+        OIDC["IAM OIDC provider<br/>(this repo's main branch only)"]
+        ECR["ECR<br/>api / frontend / mcp-server<br/>immutable tags"]
+        BEDROCK["Bedrock<br/>Titan Embed v2, Haiku 4.5 (query rewrite),<br/>Sonnet 4.5 (assess, forced tool-use)"]
+        SECRETS["Secrets Manager<br/>RDS password (also OpenSearch basic auth)"]
 
         subgraph VPC["VPC"]
-            subgraph EKS["EKS Cluster (authentication_mode: API)"]
-                API["claimpilot-api\nDeployment"]
+            ALB["ALB (from the k8s Ingress)<br/>/api to API, / to frontend"]
+            subgraph EKS["EKS Auto Mode, namespace claimpilot"]
+                FE["claimpilot-frontend<br/>nginx + React"]
+                API["claimpilot-api<br/>FastAPI + LangGraph agent<br/>Cognito ID-token check"]
             end
-            RDS[("RDS Postgres + pgvector\nclaims · triage_decisions ·\nLangGraph checkpoints")]
-            OS[("OpenSearch domain\npolicy-clauses index\nhybrid: BM25 + k-NN (Lucene)")]
+            RDS[("RDS Postgres + pgvector<br/>claims, triage_decisions,<br/>LangGraph checkpoints")]
+            OS[("OpenSearch<br/>policy-clauses<br/>BM25 + k-NN (Lucene)")]
         end
-
-        SECRETS["Secrets Manager\nRDS master password\n(reused for OpenSearch basic auth)"]
     end
 
+    USER -- HTTPS --> CF -- HTTP --> ALB
+    ALB --> FE
+    ALB --> API
+    USER <-- "sign-in (PKCE)" --> COG
+    API -- "verify token (JWKS)" --> COG
     REPO -- "push to main" --> ACTIONS
     ACTIONS -- "AssumeRoleWithWebIdentity" --> OIDC
-    ACTIONS -- "build & push image (git SHA tag)" --> ECR
-    ACTIONS -- "kubectl apply -k, wait for rollout" --> API
-    ECR -- "pull image" --> API
-    API -- "EKS Pod Identity\n(no static creds, 1 secret ARN)" --> SECRETS
-    SECRETS -.-> OS
-    API -- "hybrid_search()" --> OS
-    API -- "read/write claims,\ndecisions, checkpoints" --> RDS
-    API -- "embed_query() / converse()" --> BEDROCK
+    ACTIONS -- "push images (git SHA tag)" --> ECR
+    ACTIONS -- "kubectl apply -k, wait for rollout" --> EKS
+    API -- "Pod Identity" --> SECRETS
+    API -- "hybrid search, clause text" --> OS
+    API -- "claims, decisions, checkpoints" --> RDS
+    API -- "embed, converse" --> BEDROCK
 ```
 
 ### Agent decision flow (LangGraph)
 
 ```mermaid
 flowchart LR
-    START([Claim submitted]) --> RETRIEVE["retrieve\nhybrid search → OpenSearch"]
+    START([Claim submitted]) --> RETRIEVE["retrieve\nHaiku rewrites the query,\nhybrid search → OpenSearch\n(k=8, retry k=15 without\njurisdiction filter)"]
     RETRIEVE --> ASSESS["assess\nBedrock Claude Sonnet 4.5\n(forced tool-use)"]
     ASSESS -- "confidence < 0.6\nand first attempt" --> RETRY["prepare_retry\n(mutates state)"]
     RETRY --> RETRIEVE
@@ -60,12 +72,15 @@ A linear graph with a single conditional edge: low-confidence retrieval gets exa
 | Layer | Choice | Why |
 |---|---|---|
 | Orchestration | LangGraph `StateGraph` | Explicit, inspectable state machine rather than an implicit agent loop — the retry logic is a visible edge, not hidden control flow |
-| LLM | Bedrock Claude Sonnet 4.5, forced tool-use | Guaranteed structured output (decision/confidence/citations) without parsing JSON out of prose |
+| LLM | Bedrock Claude Sonnet 4.5 (assess, forced tool-use) + Haiku 4.5 (query rewrite) | Guaranteed structured output without parsing JSON out of prose; a cheaper model for the rewrite step |
 | Embeddings | Bedrock Titan Embed Text v2 (1024-dim) | Native Bedrock embedding, no separate embedding provider/account |
 | Retrieval | OpenSearch hybrid search (BM25 + k-NN, Lucene engine) | Lucene (not NMSLIB) is required for filtered k-NN queries |
 | Relational store | RDS Postgres + pgvector, SQLAlchemy/Alembic | Claims, triage decisions, and LangGraph checkpoints in one durable store |
 | Compute | EKS | Container orchestration for the API; Pod Identity for credential-free AWS access |
-| IaC | Terraform | VPC, RDS, OpenSearch, EKS, ECR, IAM, Secrets Manager, GitHub OIDC |
+| IaC | Terraform | VPC, RDS, OpenSearch, EKS, ECR, IAM, Secrets Manager, GitHub OIDC, Cognito, CloudFront |
+| Frontend | Vite + React + TypeScript + Tailwind, served by unprivileged nginx on EKS | Runtime config injected at container start, so one image works anywhere |
+| Auth | Cognito (Hosted UI, Authorization Code + PKCE) federated to Google; API validates the ID token itself | No passwords stored; the API, not the login screen, is the security boundary |
+| Edge | CloudFront in front of one ALB Ingress | Free HTTPS address (Cognito needs HTTPS callbacks) without buying a domain |
 | CI/CD | GitHub Actions + OIDC | No long-lived AWS keys in GitHub; role trust scoped to this repo's `main` branch only |
 
 ## Repo structure
@@ -79,12 +94,13 @@ claimpilot/
 │   │   └── db/           # SQLAlchemy models, session, seeding
 │   ├── ingest/            # OpenSearch index creation + policy ingestion
 │   ├── migrations/        # Alembic
-│   ├── scripts/           # test_agent_graph.py (local + CI test harness)
+│   ├── scripts/           # test_agent_graph.py, test_auth.py (both run in CI)
 │   └── requirements.txt
+├── docs/                    # end-to-end-guide.md - how everything fits together
 ├── evals/                   # run_eval.py + generated eval-report.md (see Eval results)
 ├── frontend/                # Vite + React + Tailwind UI (landing page, Cognito sign-in, claims list/detail, run triage) + Dockerfile
-├── infra/terraform/        # VPC, RDS, OpenSearch, EKS, ECR, IAM, OIDC, Pod Identity
-├── k8s/                     # Kustomize manifests for the API deployment
+├── infra/terraform/        # VPC, RDS, OpenSearch, EKS, ECR, IAM, OIDC, Pod Identity, Cognito, CloudFront
+├── k8s/                     # Kustomize manifests: API, frontend, ConfigMap, Ingress (+ cluster/ IngressClass, applied once)
 ├── data/synthetic/          # Generated AU policies + claims (no real data)
 ├── docker/                  # Local docker-compose Postgres, etc.
 └── .github/workflows/       # ci-cd.yml
@@ -111,6 +127,22 @@ python ingest/ingest.py --recreate-index
 ```bash
 python -m app.agent.run CLM-001
 ```
+
+To run the API and UI locally (needs the Cognito values from `terraform output` and your AWS profile for Bedrock):
+
+```bash
+cd app && export DATABASE_URL=postgresql+psycopg://claimpilot:claimpilot_local_dev@localhost:5432/claimpilot \
+  AWS_PROFILE=claimpilot AWS_REGION=ap-southeast-2 \
+  COGNITO_USER_POOL_ID=<pool id> COGNITO_APP_CLIENT_ID=<client id>
+uvicorn app.main:app --reload --port 8000
+```
+
+```bash
+cd frontend && cp .env.example .env   # fill in the Cognito domain/client ID, VITE_GOOGLE_LOGIN
+npm install && npm run dev            # http://localhost:5173
+```
+
+Deploying from scratch (Terraform, ConfigMap, IngressClass, migrating/seeding RDS, ingesting into the VPC-only OpenSearch through a proxy pod, CloudFront) is a sequence of manual steps: see [section 13 of the guide](docs/end-to-end-guide.md#13-what-is-manual-one-time-setup).
 
 Against the real AWS infra instead of local Postgres/OpenSearch, point the agent at the real OpenSearch domain and RDS instance (see `app/app/agent/clients.py` — it branches on the `OPENSEARCH_HOST` env var, using Secrets-Manager-backed basic auth when it's not `localhost`).
 
@@ -139,8 +171,8 @@ To add a domain later: Route 53 alias -> ALB, ACM certificate, certificate ARN i
 
 Three jobs, `test → build-and-push → deploy`:
 
-- **test** runs on every push and every PR (including from a fork) with zero AWS credentials — a real Postgres service container lets it run actual Alembic migrations and the agent-graph test (`scripts/test_agent_graph.py`, using fake Bedrock/OpenSearch clients by design).
-- **build-and-push** and **deploy** only run on a push to `main`, authenticate to AWS via OIDC (no stored keys), tag images by short git SHA (ECR repos are immutable), and `deploy` waits on `kubectl rollout status` so a broken image fails the pipeline instead of silently going live.
+- **test** runs on every push and every PR (including from a fork) with zero AWS credentials — a real Postgres service container lets it run actual Alembic migrations the agent-graph test (`scripts/test_agent_graph.py`, using fake Bedrock/OpenSearch clients by design) and the auth tests (`scripts/test_auth.py`, a local RSA key standing in for Cognito).
+- **build-and-push** and **deploy** only run on a push to `main`, authenticate to AWS via OIDC (no stored keys), build the API and frontend images, tag both by short git SHA (ECR repos are immutable), and `deploy` waits on `kubectl rollout status` for both Deployments so a broken image fails the pipeline instead of silently going live. CI does not run Terraform, migrations or ingestion.
 
 ## Key design decisions
 
@@ -204,6 +236,16 @@ Three real, non-obvious bugs turned up only once the pipeline was run for real a
 
 A broader meta-finding sits underneath all three: most of this repo (`app/`, `k8s/`, most of `infra/terraform/*.tf`) had actually never been committed to git before this pipeline was first run — only a handful of files had made it in. CI immediately surfaced that gap the first time it checked out a clean copy of the repo, which is exactly the kind of drift a CI pipeline is supposed to catch.
 
+### Bugs found deploying the full stack
+
+Each layer of the deployed triage path failed once, in order, and each error named the layer:
+
+- **OpenSearch 403 "User: anonymous ... es:ESHttpPut".** The domain's resource-based access policy was empty. Basic-auth requests carry no IAM identity, so without a policy allowing them the domain rejects them before checking the password. Fixed with `access_policies` in `opensearch.tf`.
+- **Bedrock `AccessDeniedException` for the pod role.** The pod role could only read the DB secret. Fixed with a scoped `bedrock:InvokeModel` policy in `pod_identity.tf`; cross-region `au.` profiles need permission on the profile and on the model in every region they route to.
+- **`index_not_found_exception [policy-clauses]`.** Clauses had been ingested locally but not into the deployed domain. Fixed by ingesting through a `socat` proxy pod.
+- **Empty `cognitoClientId` in the deployed `/config.js`.** The container entrypoint read `COGNITO_CLIENT_ID` while the ConfigMap key is `COGNITO_APP_CLIENT_ID`.
+- **Google sign-in denied by the allowlist for an allowed user.** Cognito only passes mapped attributes to the pre sign-up Lambda, and `email_verified` wasn't mapped.
+
 ## Roadmap
 
 - [x] Terraform infra (VPC, RDS, OpenSearch, EKS, ECR, IAM, Secrets Manager)
@@ -215,4 +257,7 @@ A broader meta-finding sits underneath all three: most of this repo (`app/`, `k8
 - [ ] Resolve the `unsure`-label regression and the `covered` vs `partly_covered` labels; held-out eval set
 - [ ] MCP server
 - [ ] GraphQL API layer
-- [x] React frontend (minimal demo UI; `frontend/`)
+- [x] React frontend (`frontend/`), deployed on EKS behind an ALB Ingress
+- [x] Cognito + Google sign-in with an allowlist; API enforces the ID token
+- [x] CloudFront HTTPS front door
+- [ ] In-app "how the agent decided" view from the LangGraph checkpoints
